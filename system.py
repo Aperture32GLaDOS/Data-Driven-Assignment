@@ -8,10 +8,9 @@ produce a very poor result.
 
 version: v1.0
 """
-from typing import Counter, List
+from typing import List
 
 import numpy as np
-from collections import Counter
 
 N_DIMENSIONS = 10
 
@@ -180,6 +179,12 @@ class KNN:
             distances_and_labels = np.column_stack((self.training_data_output, distances))
             distances_and_labels = distances_and_labels[distances_and_labels[:, 1].argsort()]
             k_distances_and_labels = distances_and_labels[:self.k]
-            k_labels = k_distances_and_labels[1][0]
+            k_labels = list(k_distances_and_labels[:, 0])
             predictions.append(max(set(k_labels), key=k_labels.count))
         return predictions
+
+
+test = np.array([[1], [2], [3], [4], [11], [12], [13]])
+test_out = np.array([[1], [1], [1], [1], [2], [2], [2]])
+knn = KNN(test, test_out, 1)
+print(knn.predict(np.array([[1], [8]])))
