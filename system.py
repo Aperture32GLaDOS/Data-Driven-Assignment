@@ -11,6 +11,9 @@ version: v1.0
 from typing import List
 
 import numpy as np
+from sklearn.decomposition import PCA
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.naive_bayes import GaussianNB
 
 N_DIMENSIONS = 10
 
@@ -32,8 +35,9 @@ def classify(train: np.ndarray, train_labels: np.ndarray, test: np.ndarray) -> L
         list[str]: A list of one-character strings representing the labels for each square.
     """
     n_images = test.shape[0]
-    knn = KNN(train, train_labels, 5)
-    return list(knn.predict(test))
+    gnb = GaussianNB().fit(train, train_labels)
+    knn = KNeighborsClassifier(n_neighbors=8).fit(train, train_labels)
+    return list(gnb.predict(test))
     return ["."] * n_images
 
 
@@ -61,6 +65,7 @@ def reduce_dimensions(data: np.ndarray, model: dict) -> np.ndarray:
     """
 
     reduced_data = calculate_pca(data, 10)
+    # reduced_data = PCA(n_components=10).fit_transform(data)
     return reduced_data
 
 
@@ -182,3 +187,9 @@ class KNN:
             k_labels = list(k_distances_and_labels[:, 0])
             predictions.append(max(set(k_labels), key=k_labels.count))
         return predictions
+
+
+class GaussianBayes:
+    def __init__(self, training_data_input, training_data_output):
+        self.training_data_input = training_data_input
+        self.training_data_output = training_data_output
