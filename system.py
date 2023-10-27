@@ -182,9 +182,3 @@ class KNN:
             k_labels = list(k_distances_and_labels[:, 0])
             predictions.append(max(set(k_labels), key=k_labels.count))
         return predictions
-
-
-test = np.array([[1], [2], [3], [4], [11], [12], [13]])
-test_out = np.array([[1], [1], [1], [1], [2], [2], [2]])
-knn = KNN(test, test_out, 1)
-print(knn.predict(np.array([[1], [8]])))
