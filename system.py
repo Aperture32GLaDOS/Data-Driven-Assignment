@@ -8,9 +8,10 @@ produce a very poor result.
 
 version: v1.0
 """
-from typing import List
+from typing import Counter, List
 
 import numpy as np
+from collections import Counter
 
 N_DIMENSIONS = 10
 
@@ -32,6 +33,8 @@ def classify(train: np.ndarray, train_labels: np.ndarray, test: np.ndarray) -> L
         list[str]: A list of one-character strings representing the labels for each square.
     """
     n_images = test.shape[0]
+    knn = KNN(train, train_labels, 5)
+    return list(knn.predict(test))
     return ["."] * n_images
 
 
@@ -58,7 +61,7 @@ def reduce_dimensions(data: np.ndarray, model: dict) -> np.ndarray:
         np.ndarray: The reduced feature vectors.
     """
 
-    reduced_data = data[:, 0:N_DIMENSIONS]
+    reduced_data = calculate_pca(data, 10)
     return reduced_data
 
 
@@ -150,3 +153,33 @@ def classify_boards(fvectors_test: np.ndarray, model: dict) -> List[str]:
     """
 
     return classify_squares(fvectors_test, model)
+
+
+def calculate_pca(data_input, num_of_features):
+    row_means = np.mean(data_input, axis=0)
+    centralized_data = data_input - row_means
+    covariance_matrix = np.cov(centralized_data, rowvar=False)
+    eigenvalues, eigenvectors = np.linalg.eigh(covariance_matrix)
+    idx = eigenvalues.argsort()[::-1]
+    eigenvalues = eigenvalues[idx]
+    eigenvectors = eigenvectors[:,idx]
+    eigenvectors = eigenvectors[:, :num_of_features]
+    return np.dot(eigenvectors.T, centralized_data.T).T
+
+
+class KNN:
+    def __init__(self, training_data_input, training_data_output, k):
+        self.training_data_input = training_data_input
+        self.training_data_output = training_data_output
+        self.k = k
+    def predict(self, data_input):
+        predictions = list()
+        for i in range(np.shape(data_input)[0]):
+            print(i / np.shape(data_input)[0])
+            distances = (self.training_data_input - data_input[i,:]) ** 2
+            distances_and_labels = np.column_stack((self.training_data_output, distances))
+            distances_and_labels = distances_and_labels[distances_and_labels[:, 1].argsort()]
+            k_distances_and_labels = distances_and_labels[:self.k]
+            k_labels = k_distances_and_labels[1][0]
+            predictions.append(max(set(k_labels), key=k_labels.count))
+        return predictions
