@@ -11,9 +11,7 @@ version: v1.0
 from typing import List
 
 import numpy as np
-from sklearn.decomposition import PCA
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.naive_bayes import GaussianNB
+from scipy.stats import multivariate_normal
 
 N_DIMENSIONS = 10
 
@@ -35,10 +33,11 @@ def classify(train: np.ndarray, train_labels: np.ndarray, test: np.ndarray) -> L
         list[str]: A list of one-character strings representing the labels for each square.
     """
     n_images = test.shape[0]
-    gnb = GaussianNB().fit(train, train_labels)
-    knn = KNeighborsClassifier(n_neighbors=8).fit(train, train_labels)
-    return list(gnb.predict(test))
-    return ["."] * n_images
+    gnb = GaussianBayes(train, train_labels)
+    gnb.fit()
+    # gnb = GaussianNB().fit(train, train_labels)
+    knn = KNN(train, train_labels, 5, distanceMeasure=CosineEuclidDistance())
+    return list(knn.predict(test))
 
 
 # The functions below must all be provided in your solution. Think of them
@@ -64,8 +63,9 @@ def reduce_dimensions(data: np.ndarray, model: dict) -> np.ndarray:
         np.ndarray: The reduced feature vectors.
     """
 
-    reduced_data = calculate_pca(data, 10)
-    # reduced_data = PCA(n_components=10).fit_transform(data)
+    # reduced_data = calculate_pca(data, 10)
+    np.random.seed(42)
+    reduced_data = gaussian_random_projection(data, 10)
     return reduced_data
 
 
@@ -171,20 +171,66 @@ def calculate_pca(data_input, num_of_features):
     return np.dot(eigenvectors.T, centralized_data.T).T
 
 
+def gaussian_random_projection(data_input, num_of_features):
+    current_features = data_input.shape[1]
+    random_matrix = np.random.normal(np.zeros((num_of_features, current_features)), np.ones((num_of_features, current_features)) * (1 / num_of_features))
+    return np.dot(random_matrix, data_input.T).T
+
+
+
+
+class DistanceMeasure:
+    def calculate(self, point1, point2, labels=None):
+        raise Exception("Do not use the distance measure superclass!")
+
+
+class EuclidianSquared(DistanceMeasure):
+    def calculate(self, point1, point2, labels=None):
+        return np.sum((point1 - point2) ** 2, axis=1)
+
+
+class CosineDistance(DistanceMeasure):
+    def calculate(self, point1, point2, labels=None):
+        dot = np.dot(point1, point2)
+        return 1 - (dot / (np.linalg.norm(dot)))
+
+
+class CosineEuclidDistance(DistanceMeasure):
+    def calculate(self, point1, point2, labels=None):
+        euclidSquared = EuclidianSquared().calculate(point1, point2)
+        cosineDistance = CosineDistance().calculate(point1, point2)
+        return euclidSquared * (1 + cosineDistance)
+
+
+class EuclidGaussianDistance(DistanceMeasure):
+    def __init__(self, training_data, training_samples):
+        self.gaussian = GaussianBayes(training_data, training_samples)
+        self.gaussian.fit()
+
+    def calculate(self, point1, point2, labels=None):
+        if labels is None:
+            raise Exception("Labels should be defined for the Euclidian Gaussian distance measure")
+        euclidian = EuclidianSquared().calculate(point1, point2)
+        probabilities = []
+        for i in range(len(point1)):
+            probabilities.append(1 - self.gaussian.calculate_probability(point2, labels[i]))
+        return euclidian * probabilities
+
+
 class KNN:
-    def __init__(self, training_data_input, training_data_output, k):
+    def __init__(self, training_data_input, training_data_output, k, distanceMeasure: DistanceMeasure = EuclidianSquared()):
         self.training_data_input = training_data_input
         self.training_data_output = training_data_output
         self.k = k
+        self.distanceMeasure = distanceMeasure
     def predict(self, data_input):
         predictions = list()
         for i in range(np.shape(data_input)[0]):
-            print(i / np.shape(data_input)[0])
-            distances = (self.training_data_input - data_input[i,:]) ** 2
-            distances_and_labels = np.column_stack((self.training_data_output, distances))
-            distances_and_labels = distances_and_labels[distances_and_labels[:, 1].argsort()]
-            k_distances_and_labels = distances_and_labels[:self.k]
-            k_labels = list(k_distances_and_labels[:, 0])
+            distances = self.distanceMeasure.calculate(self.training_data_input, data_input[i,:], self.training_data_output)
+            idx = distances.argsort()
+            distances = distances[idx]
+            labels = self.training_data_output[idx]
+            k_labels = list(labels[:self.k].flatten())
             predictions.append(max(set(k_labels), key=k_labels.count))
         return predictions
 
@@ -193,3 +239,28 @@ class GaussianBayes:
     def __init__(self, training_data_input, training_data_output):
         self.training_data_input = training_data_input
         self.training_data_output = training_data_output
+
+    def fit(self):
+        labels = list(set(self.training_data_output.flatten()))
+        self.labels = labels
+        self.pdfs = []
+        self.priors = []
+        for label in labels:
+            training_data_labelled = self.training_data_input[np.argwhere(self.training_data_output == label)].squeeze()
+            mean = np.mean(training_data_labelled, axis=0)
+            covariance = np.cov(training_data_labelled, rowvar=False)
+            self.pdfs.append(multivariate_normal(mean=mean, cov=covariance))
+            self.priors.append(len(training_data_labelled) / len(self.training_data_input))
+
+    def calculate_probability(self, data, label):
+        idx = self.labels.index(label)
+        return self.pdfs[idx].pdf(data) * self.priors[idx]
+
+    def predict(self, data_input):
+        predictions = []
+        for i in range(np.shape(data_input)[0]):
+            probabilities = []
+            for j in range(len(self.pdfs)):
+                probabilities.append(self.calculate_probability(data_input[i], self.labels[j]))
+            predictions.append(self.labels[probabilities.index(max(probabilities))])
+        return predictions
