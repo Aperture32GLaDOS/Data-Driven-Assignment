@@ -2,11 +2,7 @@
 
 Solution outline for the COM2004/3004 assignment.
 
-This solution will run but the dimensionality reduction and
-the classifier are not doing anything useful, so it will
-produce a very poor result.
-
-version: v1.0
+version: v2.0
 """
 from typing import List
 
@@ -22,10 +18,7 @@ N_DIMENSIONS = 10
 def classify(train: np.ndarray, train_labels: np.ndarray, test: np.ndarray) -> List[str]:
     """Classify a set of feature vectors using a training set.
 
-    This dummy implementation simply returns the empty square label ('.')
-    for every input feature vector in the test data.
-
-    Note, this produces a surprisingly high score because most squares are empty.
+    Uses a basic KNN method using the EuclidianSquared distance measure
 
     Args:
         train (np.ndarray): 2-D array storing the training feature vectors.
@@ -35,7 +28,6 @@ def classify(train: np.ndarray, train_labels: np.ndarray, test: np.ndarray) -> L
     Returns:
         list[str]: A list of one-character strings representing the labels for each square.
     """
-    n_images = test.shape[0]
     knn = KNN(train, train_labels, 5, distanceMeasure=EuclidianSquared())
     return list(knn.predict(test))
 
@@ -52,8 +44,8 @@ def classify(train: np.ndarray, train_labels: np.ndarray, test: np.ndarray) -> L
 def reduce_dimensions(data: np.ndarray, model: dict) -> np.ndarray:
     """Reduce the dimensionality of a set of feature vectors down to N_DIMENSIONS.
 
-    The feature vectors are stored in the rows of 2-D array data, (i.e., a data matrix).
-    The dummy implementation below simply returns the first N_DIMENSIONS columns.
+    Uses PCA to reduce the data to N_DIMENSIONS
+    Initially calculates the matrix of eigenvectors in process_training_data, and saves the resulting matrix in the model for later use
 
     Args:
         data (np.ndarray): The feature vectors to reduce.
@@ -63,15 +55,15 @@ def reduce_dimensions(data: np.ndarray, model: dict) -> np.ndarray:
         np.ndarray: The reduced feature vectors.
     """
 
-    reduced_data = calculate_pca(data, np.array(model["pca_matrix"]))
+    reduced_data = calculatePCA(data, np.array(model["pca_matrix"]))
     return reduced_data
 
 
 def process_training_data(fvectors_train: np.ndarray, labels_train: np.ndarray) -> dict:
     """Process the labeled training data and return model parameters stored in a dictionary.
 
-    Note, the contents of the dictionary are up to you, and it can contain any serializable
-    data types stored under any keys. This dictionary will be passed to the classifier.
+    Calculates the matrix of eigenvectors for PCA usage
+    Also computes a lookup table for p(chess piece | location on board), implemented using Bayes' theorem
 
     Args:
         fvectors_train (np.ndarray): training data feature vectors stored as rows.
@@ -89,7 +81,7 @@ def process_training_data(fvectors_train: np.ndarray, labels_train: np.ndarray) 
     try:
         model["pca_matrix"]
     except KeyError:
-        model["pca_matrix"] = calculate_pca_matrix(fvectors_train, 10).tolist()
+        model["pca_matrix"] = calculatePCAMatrix(fvectors_train, N_DIMENSIONS).tolist()
     model["location_lookup_table"] = {}
     labels = list('.KkQqRrPpBbNn')
     for i in range(64):
@@ -156,8 +148,9 @@ def classify_boards(fvectors_test: np.ndarray, model: dict) -> List[str]:
     you can infer the position on the board from the position of the feature vector
     in the feature vector array.
 
-    In the dummy code below, we just re-use the simple classify_squares function,
-    i.e. we ignore the ordering.
+    Unlike classify_squares, this does not call classify. This is because a different distance measure is used
+    Since we have access to the location on the board, this information can be used to make a better distance measure
+    I call this distance measure EuclidWithPriors
 
     Args:
         fvectors_test (np.ndarray): An array in which feature vectors are stored as rows.
@@ -173,7 +166,19 @@ def classify_boards(fvectors_test: np.ndarray, model: dict) -> List[str]:
     return list(knn.predict(fvectors_test))
 
 
-def getPrior(label: str, position: int, labels_train):
+def getPrior(label: str, position: int, labels_train) -> float:
+    """Computes p(chess piece | position on board)
+    
+    This is implemented using Bayes' theorem, so p(chess piece | position on board) = p(position on board | chess piece) * p(position on board) / p(chess piece)
+    Since all positions on a chess board are equally likely, this is hardcoded as 1/64
+    
+    Args:
+        label (str): The chess piece for which the probability is being calculated
+        position (int): The position on the board, represented as a number from 0-63, 0 being the top left and 63 being the bottom right
+
+    Returns:
+        float: The probability of the chess piece given its location on the board
+    """
     labels_flattened = labels_train.flatten()
     rawPrior = getRawPrior(label, labels_flattened)
 
@@ -184,11 +189,31 @@ def getPrior(label: str, position: int, labels_train):
     return probabilityOfPiece
 
 
-def getRawPrior(label: str, labels_flattened):
+def getRawPrior(label: str, labels_flattened) -> float:
+    """Calculates the 'raw prior' for a chess piece
+    This is defined as just the probablity of the chess piece, p(chess piece)
+
+    Args:
+        label (str): The chess piece in question
+        labels_flattened (np.ndarray): A 1D array containing all chess pieces in the training dataset
+
+    Returns:
+        float: The proportion of pieces in the dataset which match the given chess piece
+    """
     labels_filtered = np.where(labels_flattened == label)[0]
     return len(labels_filtered) / len(labels_flattened)
 
-def getProbabilityOfLocation(label: str, position: int, labels_flattened):
+def getProbabilityOfLocation(label: str, position: int, labels_flattened) -> float:
+    """Calculates the probability of a location given a chess piece, p(location | chess piece)
+    This is defined as the proportion of chess squares of that location which contain the chess piece in question
+
+    Args:
+        label (str): The chess piece in question
+        position (int): The position on the chess board, from 0 to 63
+
+    Returns:
+        float: The probability of that location given the chess board
+    """
     labels_with_locations = []
     idxs = np.arange(position, len(labels_flattened), 64)
     labels_with_locations = labels_flattened[idxs]
@@ -197,7 +222,16 @@ def getProbabilityOfLocation(label: str, position: int, labels_flattened):
     return len(labels_with_locations_filtered) / len(labels_with_locations)
 
 
-def calculate_pca_matrix(data_input, num_of_features):
+def calculatePCAMatrix(data_input, num_of_features: int):
+    """Calculates the matrix of centralized data eigenvectors for some data
+    
+    Args:
+        data_input (np.ndarray): The data for which the matrix is to be calculated
+        num_of_features (int): The number of features after the matrix is applied on the data
+
+    Returns:
+        np.ndarray: The matrix of eigenvectors for the centralized data. This matrix contains num_of_features eigenvectors
+    """
     row_means = np.mean(data_input, axis=0)
     centralized_data = data_input - row_means
     covariance_matrix = np.cov(centralized_data, rowvar=False)
@@ -209,13 +243,31 @@ def calculate_pca_matrix(data_input, num_of_features):
     return eigenvectors
 
 
-def calculate_pca(data_input, matrix):
+def calculatePCA(data_input, matrix):
+    """Calculates the reduced data given a data input and a matrix from calculatePCAMatrix
+    
+    Args:
+        data_input (np.ndarray): The data input to be reduced
+        matrix (np.ndarray): The relevant matrix of eigenvectors from calculatePCAMatrix
+
+    Returns:
+        np.ndarray: The transformed data_input, reduced to the desired number of features
+    """
     row_means = np.mean(data_input, axis=0)
     centralized_data = data_input - row_means
     return np.dot(matrix.T, centralized_data.T).T
 
 
-def gaussian_random_projection(data_input, num_of_features):
+def gaussianRandomProjection(data_input, num_of_features: int):
+    """Carries out gaussian random projection on some data
+    
+    Args:
+        data_input (np.ndarray): The data input to be transformed
+        num_of_features (int): The desired number of features
+
+    Returns:
+        np.ndarray: The input data, having been reduced to num_of_features via gaussian random projection
+    """
     current_features = data_input.shape[1]
     random_matrix = np.random.normal(np.zeros((num_of_features, current_features)), np.ones((num_of_features, current_features)) * (1 / num_of_features))
     return np.dot(random_matrix, data_input.T).T
@@ -223,22 +275,28 @@ def gaussian_random_projection(data_input, num_of_features):
 
 
 
+# A superclass for distance measures, this should never be directly instantiated
 class DistanceMeasure:
     def calculate(self, point1, point2, labels=None, position=None):
         raise Exception("Do not use the distance measure superclass!")
 
 
+# The Euclidian squared distance measure
+# While the Euclidian measure would take the square root, the Euclidian squared distance measure does not. This produces an identical distance measure,
+# but saves on CPU time
 class EuclidianSquared(DistanceMeasure):
     def calculate(self, point1, point2, labels=None, position=None):
         return np.sum((point1 - point2) ** 2, axis=1)
 
 
+# The cosine distance measure
 class CosineDistance(DistanceMeasure):
     def calculate(self, point1, point2, labels=None, position=None):
         dot = np.dot(point1, point2)
         return 1 - (dot / (np.linalg.norm(dot)))
 
 
+# A combined distance measure of Euclidian squared and Cosine, defined as the Euclidian squared measure * (1 + Cosine distance)
 class CosineEuclidDistance(DistanceMeasure):
     def calculate(self, point1, point2, labels=None, position=None):
         euclidSquared = EuclidianSquared().calculate(point1, point2)
@@ -246,7 +304,10 @@ class CosineEuclidDistance(DistanceMeasure):
         return euclidSquared * (1 + cosineDistance)
 
 
+# A distance measure which attempts to combine KNN and a Gaussian model of the data.
 class EuclidGaussianDistance(DistanceMeasure):
+    # The idea is to fit a Gaussian model of the data, and use this to scale Euclidian squared distances
+    # In practice, this is only as affective as a Gaussian model using the Bayes classifier
     def __init__(self, training_data, training_samples):
         self.gaussian = GaussianBayes(training_data, training_samples)
         self.gaussian.fit()
@@ -260,10 +321,14 @@ class EuclidGaussianDistance(DistanceMeasure):
         return euclidian * probabilities
 
 
+# Another non-standard distance measure
+# This one uses the priors instead of a Gaussian model to scale the distances
+# With standard data, the priors are simply the proportions of chess pieces and so this simply causes the more popular labels to be selected
+# When board data is included, though, this allows the classifier to model the fact that some chess pieces should not be in certain places
+# It should be noted that this is not a true model, though, and is just simple statistics put in practice
 class EuclidWithPriors(DistanceMeasure):
     def __init__(self, lookup_table):
         self.lookup_table = lookup_table
-
 
     def calculate(self, point1, point2, labels, position):
         euclidDistance = EuclidianSquared().calculate(point1, point2)
@@ -274,6 +339,7 @@ class EuclidWithPriors(DistanceMeasure):
         return (euclidDistance / np.array(priors))
 
 
+# The K-Nearest Neighbors classifier
 class KNN:
     def __init__(self, training_data_input, training_data_output, k, distanceMeasure: DistanceMeasure = EuclidianSquared()):
         self.training_data_input = training_data_input
@@ -281,8 +347,8 @@ class KNN:
         self.k = k
         self.distanceMeasure = distanceMeasure
 
+    # This is a multi-threaded (technically multi-process) predict, as some distance measures are very time-heavy
     def predict(self, data_input):
-        start_time = time.time()
         NUM_THREADS = 10
         pools = []
         results = []
@@ -298,6 +364,8 @@ class KNN:
         for result in results:
             predictions.append(result.get())
         return np.array(predictions).flatten()
+
+    # This is where the actual computations are done, and what the predict() method calls in its threads
     def sub_predict(self, data_input, start, end):
         predictions = list()
         for i in range(start, end):
@@ -309,6 +377,8 @@ class KNN:
         return predictions
 
 
+# This is a Bayesian classifier which models the data using a Gaussian distribution
+# Though this is more complex than the KNN classifier, in practice it is less effective
 class GaussianBayes:
     def __init__(self, training_data_input, training_data_output, priors=None):
         self.training_data_input = training_data_input
