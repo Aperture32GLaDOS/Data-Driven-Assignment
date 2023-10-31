@@ -33,10 +33,7 @@ def classify(train: np.ndarray, train_labels: np.ndarray, test: np.ndarray) -> L
         list[str]: A list of one-character strings representing the labels for each square.
     """
     n_images = test.shape[0]
-    gnb = GaussianBayes(train, train_labels)
-    gnb.fit()
-    # gnb = GaussianNB().fit(train, train_labels)
-    knn = KNN(train, train_labels, 5, distanceMeasure=CosineEuclidDistance())
+    knn = KNN(train, train_labels, 5, distanceMeasure=EuclidianSquared())
     return list(knn.predict(test))
 
 
@@ -63,9 +60,7 @@ def reduce_dimensions(data: np.ndarray, model: dict) -> np.ndarray:
         np.ndarray: The reduced feature vectors.
     """
 
-    # reduced_data = calculate_pca(data, 10)
-    np.random.seed(42)
-    reduced_data = gaussian_random_projection(data, 10)
+    reduced_data = calculate_pca(data, np.array(model["pca_matrix"]))
     return reduced_data
 
 
@@ -88,6 +83,10 @@ def process_training_data(fvectors_train: np.ndarray, labels_train: np.ndarray) 
     # then the model will need to store the dimensionally-reduced training data and labels.
     model = {}
     model["labels_train"] = labels_train.tolist()
+    try:
+        model["pca_matrix"]
+    except KeyError:
+        model["pca_matrix"] = calculate_pca_matrix(fvectors_train, 10).tolist()
     fvectors_train_reduced = reduce_dimensions(fvectors_train, model)
     model["fvectors_train"] = fvectors_train_reduced.tolist()
     return model
@@ -155,11 +154,35 @@ def classify_boards(fvectors_test: np.ndarray, model: dict) -> List[str]:
     Returns:
         list[str]: A list of one-character strings representing the labels for each square.
     """
+    fvectors_train = np.array(model["fvectors_train"])
+    labels_train = np.array(model["labels_train"])
+    knn = KNN(fvectors_train, labels_train, 5)
+    # gaussianPredictor = GaussianBayesWithLocation(fvectors_train, labels_train)
+    # gaussianPredictor.fit()
+    return list(knn.predict(fvectors_test))
 
-    return classify_squares(fvectors_test, model)
 
+def getPrior(label: str, position: int, fvectors_train, labels_train):
+    distance_down_board = position // 64
+    distance_across_board = position % 64
 
-def calculate_pca(data_input, num_of_features):
+    labels_filtered = np.where(labels_train.flatten() == label)[0]
+    rawPrior = len(labels_filtered) / len(labels_train.flatten())
+
+    labels_with_locations = []
+    for i in range(len(labels_train.flatten())):
+        if i % 64 == position:
+            labels_with_locations.append(labels_train.flatten()[i])
+
+    labels_with_locations = np.array(labels_with_locations)
+    labels_with_locations_filtered = np.where(labels_with_locations == label)[0]
+    probabilityOfLocation = len(labels_with_locations_filtered) / len(labels_with_locations)
+
+    # Bayes' theorem
+    probabilityOfPiece = (probabilityOfLocation * (1 / 64)) / rawPrior
+    return probabilityOfPiece
+
+def calculate_pca_matrix(data_input, num_of_features):
     row_means = np.mean(data_input, axis=0)
     centralized_data = data_input - row_means
     covariance_matrix = np.cov(centralized_data, rowvar=False)
@@ -168,7 +191,13 @@ def calculate_pca(data_input, num_of_features):
     eigenvalues = eigenvalues[idx]
     eigenvectors = eigenvectors[:,idx]
     eigenvectors = eigenvectors[:, :num_of_features]
-    return np.dot(eigenvectors.T, centralized_data.T).T
+    return eigenvectors
+
+
+def calculate_pca(data_input, matrix):
+    row_means = np.mean(data_input, axis=0)
+    centralized_data = data_input - row_means
+    return np.dot(matrix.T, centralized_data.T).T
 
 
 def gaussian_random_projection(data_input, num_of_features):
@@ -236,25 +265,30 @@ class KNN:
 
 
 class GaussianBayes:
-    def __init__(self, training_data_input, training_data_output):
+    def __init__(self, training_data_input, training_data_output, priors=None):
         self.training_data_input = training_data_input
         self.training_data_output = training_data_output
+        self.priors = priors
 
     def fit(self):
         labels = list(set(self.training_data_output.flatten()))
         self.labels = labels
         self.pdfs = []
-        self.priors = []
+        doPriors = False
+        if self.priors is not None:
+            doPriors = True
+        self.priors = {}
         for label in labels:
             training_data_labelled = self.training_data_input[np.argwhere(self.training_data_output == label)].squeeze()
             mean = np.mean(training_data_labelled, axis=0)
             covariance = np.cov(training_data_labelled, rowvar=False)
             self.pdfs.append(multivariate_normal(mean=mean, cov=covariance))
-            self.priors.append(len(training_data_labelled) / len(self.training_data_input))
+            if doPriors:
+                self.priors[label] = len(training_data_labelled) / len(self.training_data_input)
 
     def calculate_probability(self, data, label):
         idx = self.labels.index(label)
-        return self.pdfs[idx].pdf(data) * self.priors[idx]
+        return self.pdfs[idx].pdf(data) * self.priors[label]
 
     def predict(self, data_input):
         predictions = []
@@ -262,5 +296,38 @@ class GaussianBayes:
             probabilities = []
             for j in range(len(self.pdfs)):
                 probabilities.append(self.calculate_probability(data_input[i], self.labels[j]))
+            predictions.append(self.labels[probabilities.index(max(probabilities))])
+        return predictions
+
+
+class GaussianBayesWithLocation:
+    def __init__(self, training_data_input, training_data_output, priors=None):
+        self.training_data_input = training_data_input
+        self.training_data_output = training_data_output
+        self.labels = []
+
+    def fit(self):
+        labels = list(set(self.training_data_output.flatten()))
+        self.labels = labels
+        self.pdfs = []
+        for label in labels:
+            training_data_labelled = self.training_data_input[np.argwhere(self.training_data_output == label)].squeeze()
+            mean = np.mean(training_data_labelled, axis=0)
+            covariance = np.cov(training_data_labelled, rowvar=False)
+            self.pdfs.append(multivariate_normal(mean=mean, cov=covariance))
+
+
+    def calculate_probability(self, data, label, label_position):
+        prior = getPrior(label, label_position, self.training_data_input, self.training_data_output)
+        idx = self.labels.index(label)
+        return self.pdfs[idx].pdf(data) * prior
+    
+    def predict(self, data_input):
+        predictions = []
+        for i in range(np.shape(data_input)[0]):
+            position = i % 64
+            probabilities = []
+            for j in range(len(self.pdfs)):
+                probabilities.append(self.calculate_probability(data_input[i], self.labels[j], position))
             predictions.append(self.labels[probabilities.index(max(probabilities))])
         return predictions
