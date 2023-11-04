@@ -8,9 +8,8 @@ from typing import List
 
 import numpy as np
 from scipy.stats import multivariate_normal
-from functools import lru_cache
 from multiprocessing.pool import Pool
-import time
+from collections import Counter
 
 N_DIMENSIONS = 10
 
@@ -132,7 +131,7 @@ def classify_squares(fvectors_test: np.ndarray, model: dict) -> List[str]:
     """
 
     # Get some data out of the model. It's up to you what you've stored in here
-    fvectors_train = np.array(model["fvectors_train"])
+    fvectors_train = np.array(model["fvectors_train"], dtype=np.float128)
     labels_train = np.array(model["labels_train"])
 
     # Call the classify function.
@@ -159,7 +158,7 @@ def classify_boards(fvectors_test: np.ndarray, model: dict) -> List[str]:
     Returns:
         list[str]: A list of one-character strings representing the labels for each square.
     """
-    fvectors_train = np.array(model["fvectors_train"])
+    fvectors_train = np.array(model["fvectors_train"], dtype=np.float128)
     labels_train = np.array(model["labels_train"])
     lookup_table = model["location_lookup_table"]
     knn = KNN(fvectors_train, labels_train, 5, distanceMeasure=EuclidWithPriors(lookup_table))
@@ -289,6 +288,24 @@ class EuclidianSquared(DistanceMeasure):
         return np.sum((point1 - point2) ** 2, axis=1)
 
 
+class EuclidDistance(DistanceMeasure):
+    def calculate(self, point1, point2, labels=None, position=None):
+        return np.sqrt(EuclidianSquared().calculate(point1, point2))
+
+
+class LpNormDistance(DistanceMeasure):
+    def __init__(self, p):
+        self.p = p
+
+    def calculate(self, point1, point2, labels=None, position=None):
+        return np.power(np.abs(np.sum((point1 - point2) ** self.p, axis=1)), 1 / self.p)
+
+
+class Manhattan(DistanceMeasure):
+    def calculate(self, point1, point2, labels=None, position=None):
+        return np.sum(np.abs(point1 - point2), axis=1)
+
+
 # The cosine distance measure
 class CosineDistance(DistanceMeasure):
     def calculate(self, point1, point2, labels=None, position=None):
@@ -331,12 +348,12 @@ class EuclidWithPriors(DistanceMeasure):
         self.lookup_table = lookup_table
 
     def calculate(self, point1, point2, labels, position):
-        euclidDistance = EuclidianSquared().calculate(point1, point2)
+        euclidDistance = LpNormDistance(2).calculate(point1, point2)
         # priors = getPriors(labels, positions, self.training_data, self.training_samples) + 1
         priors = []
         for label in labels:
             priors.append(self.lookup_table[label][str(position)] + 1)
-        return (euclidDistance / np.array(priors))
+        return (euclidDistance / np.array(priors, dtype=np.float128))
 
 
 # The K-Nearest Neighbors classifier
@@ -370,10 +387,10 @@ class KNN:
         predictions = list()
         for i in range(start, end):
             distances = self.distanceMeasure.calculate(self.training_data_input, data_input[i,:], self.training_data_output, i % 64)
-            idx = np.argpartition(distances, self.k, axis=0)[:self.k]
+            idx = np.argsort(distances)[:self.k]
             labels = self.training_data_output[idx]
             k_labels = list(labels[:self.k].flatten())
-            predictions.append(max(set(k_labels), key=k_labels.count))
+            predictions.append(Counter(k_labels).most_common(1)[0][0])
         return predictions
 
 
@@ -390,7 +407,7 @@ class GaussianBayes:
         self.labels = labels
         self.pdfs = []
         doPriors = False
-        if self.priors is not None:
+        if self.priors is None:
             doPriors = True
         self.priors = {}
         for label in labels:
