@@ -81,6 +81,7 @@ def process_training_data(fvectors_train: np.ndarray, labels_train: np.ndarray) 
         model["pca_matrix"]
     except KeyError:
         model["pca_matrix"] = calculatePCAMatrix(fvectors_train, N_DIMENSIONS).tolist()
+        # model["pca_matrix"] = base64.b64encode(pickle.dumps(LinearDiscriminantAnalysis(n_components=10).fit(fvectors_train, labels_train))).decode('ascii')
     model["location_lookup_table"] = {}
     labels = list('.KkQqRrPpBbNn')
     for i in range(64):
@@ -222,18 +223,16 @@ def getProbabilityOfLocation(label: str, position: int, labels_flattened) -> flo
 
 
 def calculatePCAMatrix(data_input, num_of_features: int):
-    """Calculates the matrix of centralized data eigenvectors for some data
+    """Calculates the matrix of eigenvectors for some data
     
     Args:
         data_input (np.ndarray): The data for which the matrix is to be calculated
         num_of_features (int): The number of features after the matrix is applied on the data
 
     Returns:
-        np.ndarray: The matrix of eigenvectors for the centralized data. This matrix contains num_of_features eigenvectors
+        np.ndarray: The matrix of eigenvectors for the data. This matrix contains num_of_features eigenvectors
     """
-    row_means = np.mean(data_input, axis=0)
-    centralized_data = data_input - row_means
-    covariance_matrix = np.cov(centralized_data, rowvar=False)
+    covariance_matrix = np.cov(data_input, rowvar=False)
     eigenvalues, eigenvectors = np.linalg.eigh(covariance_matrix)
     idx = eigenvalues.argsort()[::-1]
     eigenvalues = eigenvalues[idx]
@@ -252,9 +251,7 @@ def calculatePCA(data_input, matrix):
     Returns:
         np.ndarray: The transformed data_input, reduced to the desired number of features
     """
-    row_means = np.mean(data_input, axis=0)
-    centralized_data = data_input - row_means
-    return np.dot(matrix.T, centralized_data.T).T
+    return np.dot(matrix.T, data_input.T).T
 
 
 def gaussianRandomProjection(data_input, num_of_features: int):
