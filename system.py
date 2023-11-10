@@ -81,7 +81,6 @@ def process_training_data(fvectors_train: np.ndarray, labels_train: np.ndarray) 
         model["pca_matrix"]
     except KeyError:
         model["pca_matrix"] = calculatePCAMatrix(fvectors_train, N_DIMENSIONS).tolist()
-        # model["pca_matrix"] = base64.b64encode(pickle.dumps(LinearDiscriminantAnalysis(n_components=10).fit(fvectors_train, labels_train))).decode('ascii')
     model["location_lookup_table"] = {}
     labels = list('.KkQqRrPpBbNn')
     for i in range(64):
@@ -233,6 +232,7 @@ def calculatePCAMatrix(data_input, num_of_features: int):
         np.ndarray: The matrix of eigenvectors for the data. This matrix contains num_of_features eigenvectors
     """
     covariance_matrix = np.cov(data_input, rowvar=False)
+    # eigh can be used as an optimization here, as the covariance matrix is symmetric
     eigenvalues, eigenvectors = np.linalg.eigh(covariance_matrix)
     idx = eigenvalues.argsort()[::-1]
     eigenvalues = eigenvalues[idx]
